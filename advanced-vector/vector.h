@@ -253,6 +253,7 @@ public:
     }
 
     void PopBack() noexcept {
+        assert(size_ != 0);
         std::destroy_at(data_.GetAddress() + (size_ - 1));
         --size_;
     }
@@ -267,36 +268,17 @@ public:
         }
 
         if (size_ == this->Capacity()) {
-            RawMemory<T> new_data(size_ == 0 ? 1 : size_ * 2);
-            new (new_data + offset) T(std::forward<Args>(args)...);
-            try {
-                TransferDataSafely(begin(), offset, new_data.GetAddress());
-            }
-            catch (...) {
-                std::destroy_at(new_data.GetAddress() + offset);
-                throw;
-            }
-
-            try {
-                TransferDataSafely(begin() + offset, size_ - offset, new_data.GetAddress() + (offset + 1));
-            }
-            catch (...) {
-                std::destroy_n(new_data.GetAddress(), offset + 1);
-                throw;
-            }
-            std::destroy_n(data_.GetAddress(), size_);
-            data_ = std::move(new_data);
+            EmplaceWithRealloc(offset, std::forward<Args>(args)...);
         }
         else {
-            new (end()) T(std::forward<T>(*(end() - 1)));
-            std::move_backward(begin() + offset, end() - 1, end());
-            data_[offset] = T(std::forward<Args>(args)...);
+            EmplaceWithoutRealloc(offset, std::forward<Args>(args)...);
         }
         ++size_;
         return begin() + offset;
     }
 
     iterator Erase(const_iterator pos) {
+        assert(size_ != 0);
         size_t offset = std::distance(cbegin(), pos);
         std::move(begin() + offset + 1, end(), begin() + offset);
         std::destroy_at(end() - 1);
@@ -327,6 +309,36 @@ private:
         else {
             std::uninitialized_copy_n(old_begin, count, new_begin);
         }
+    }
+
+    template <typename... Args>
+    void EmplaceWithRealloc(size_t offset, Args&&... args) {
+        RawMemory<T> new_data(size_ == 0 ? 1 : size_ * 2);
+        new (new_data + offset) T(std::forward<Args>(args)...);
+        try {
+            TransferDataSafely(begin(), offset, new_data.GetAddress());
+        }
+        catch (...) {
+            std::destroy_at(new_data.GetAddress() + offset);
+            throw;
+        }
+
+        try {
+            TransferDataSafely(begin() + offset, size_ - offset, new_data.GetAddress() + (offset + 1));
+        }
+        catch (...) {
+            std::destroy_n(new_data.GetAddress(), offset + 1);
+            throw;
+        }
+        std::destroy_n(data_.GetAddress(), size_);
+        data_ = std::move(new_data);
+    }
+
+    template <typename... Args>
+    void EmplaceWithoutRealloc(size_t offset, Args&&... args) {
+        new (end()) T(std::forward<T>(*(end() - 1)));
+        std::move_backward(begin() + offset, end() - 1, end());
+        data_[offset] = T(std::forward<Args>(args)...);
     }
 };
 
